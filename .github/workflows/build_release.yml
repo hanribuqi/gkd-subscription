@@ -8,19 +8,17 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4.1.7
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4.0.0
+      - uses: actions/setup-node@v4
         with:
-          version: latest
-          run_install: true
+          node-version: 22
 
-      - uses: actions/setup-node@v4.0.3
-        with:
-          node-version: lts/*
-          cache: pnpm
+      - uses: pnpm/action-setup@v4
+
+      - run: pnpm install
 
       - run: pnpm run build
 
@@ -28,9 +26,6 @@ jobs:
         run: |
           version=$(node -e "import('@gkd-kit/tools').then((m) => m.stdoutGkdVersion());")
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-
-      - id: update_pkg_version
-        run: node -e "import('@gkd-kit/tools').then((m) => m.updatePkgVersion());"
 
       - name: Git commit
         id: commit
@@ -51,9 +46,8 @@ jobs:
           tags: true
 
       - name: Create Release
-        id: create_release
         if: ${{ steps.commit.outcome == 'success' }}
-        uses: actions/create-release@v1.1.4
+        uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -61,28 +55,12 @@ jobs:
           release_name: Release ${{ steps.version.outputs.version }}
           body_path: ./dist/CHANGELOG.md
 
-      - name: Upload Release
-        if: ${{ steps.commit.outcome == 'success' }}
-        uses: actions/upload-release-asset@v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dist/gkd.json5
-          asset_name: gkd_${{ steps.version.outputs.version }}.json5
-          asset_content_type: application/json
-
       - name: Publish package
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          if: ${{ steps.commit.outcome == 'success' && env.NPM_TOKEN != '' }}
+        if: ${{ steps.commit.outcome == 'success' && env.NPM_TOKEN != '' }}
         run: |
           pnpm config set //registry.npmjs.org/:_authToken ${{ secrets.NPM_TOKEN }}
+          node -e "import('@gkd-kit/tools').then((m) => m.updatePkgVersion());"
           pnpm publish --no-git-checks
           node -e "import('@gkd-kit/tools').then((m) => m.syncNpmmirror());"
-
-      - name: sync
-        if: ${{ steps.commit.outcome == 'success' }}
-        run: |
-          curl -X PUT 'https://registry-direct.npmmirror.com/gkd-subscription/sync'
-          curl -X PUT 'https://purge.jsdelivr.net/npm/gkd-subscription/dist'
